@@ -1,0 +1,201 @@
+diff --git a/configurations/task_configs/template.py b/configurations/task_configs/template.py
+index a4cd83a..3071a3a 100644
+--- a/configurations/task_configs/template.py
++++ b/configurations/task_configs/template.py
+@@ -208,7 +208,7 @@ EVAL_CONFIG_DEFAULT = {
+     "joint_num": 7,  # the number of joints of one robot (e.g. arm + end effector)
+     "start_joint": [0.0] * 7,  # the start joint angles of the robot
+     "max_timesteps": 400,  # 一般可以设置跟数据采集时的episode_len相等
+-    "num_rollouts": 50,  # 程序一次运行最大的推理次数
++    "num_rollouts": 100,  # 程序一次运行最大的推理次数
+     "save_dir": EVAL_DIR_DEFAULT,  # "" if not save the evaluation results, AUTO means the same as the ckpt_dir
+     "time_stamp": None,  # None if not used
+     "fps": 25,  # the frequency for executing actions (should > inference frequency)
+diff --git a/envs/make_env.py b/envs/make_env.py
+index 9059f31..8c15ff5 100644
+--- a/envs/make_env.py
++++ b/envs/make_env.py
+@@ -25,7 +25,9 @@ def make_environment(env_config):
+ 
+     robot_instances: List[AssembledRobot] = []
+     env = None
+-    if robot_name == "none" or habitat == "mujoco":
++    if habitat == "mujoco" and "franka" in robot_name.lower():
++        print("No direct robot is used (Franka in Mujoco)")
++    elif robot_name == "none" or habitat == "mujoco":
+         print("No direct robot is used")
+     elif "airbot_play" in robot_name:
+         # set up can
+diff --git a/habitats/common/robot_devices/cameras/utils.py b/habitats/common/robot_devices/cameras/utils.py
+index 6197213..42c6bf1 100644
+--- a/habitats/common/robot_devices/cameras/utils.py
++++ b/habitats/common/robot_devices/cameras/utils.py
+@@ -61,6 +61,7 @@ class Camera(Protocol):
+ 
+ 
+ def prepare_cv2_imshow():
++    return
+     print("Preparing cv2.imshow")
+     image = np.zeros((480, 640, 3), np.uint8)
+ 
+diff --git a/policy_evaluate.py b/policy_evaluate.py
+index f9fbfcf..d73bccf 100644
+--- a/policy_evaluate.py
++++ b/policy_evaluate.py
+@@ -1,7 +1,5 @@
+ from habitats.common.robot_devices.cameras.utils import prepare_cv2_imshow
+ 
+-prepare_cv2_imshow()
+-
+ import argparse
+ import inspect
+ import logging
+@@ -22,8 +20,8 @@ from configurations.task_configs.config_tools.basic_configer import (
+ )
+ from envs.common_env import CommonEnv, get_image
+ from policies.common.maker import make_policy
+-from utils.utils import save_eval_results, set_seed, AvCoder
+-
++# from utils.utils import save_eval_results, set_seed, AvCoder
++from utils.utils import save_eval_results, set_seed
+ 
+ logging.basicConfig(level=logging.INFO)
+ logger = logging.getLogger(__name__)
+@@ -181,7 +179,7 @@ def eval_bc(config, ckpt_name, env: CommonEnv):
+         action_list = []
+         rewards = []
+         time_base = int(1e6)
+-        coder = AvCoder(time_base=time_base, async_encode=True)
++        # coder = AvCoder(time_base=time_base, async_encode=True)
+         factor = int(1e9 / time_base)
+         with torch.inference_mode():
+             logger.info("Reset environment...")
+@@ -200,26 +198,41 @@ def eval_bc(config, ckpt_name, env: CommonEnv):
+                 if key in exit_keys:
+                     break
+             else:
+-                key = input(
+-                    "Press `Enter` to start evaluation or `z` and `Enter` to exit..."
+-                )
+-                if key == "z":
+-                    break
++                # key = input(
++                #     "Press `Enter` to start evaluation or `z` and `Enter` to exit..."
++                # )
++                # if key == "z":
++                #     break
++                logger.info("Auto start evaluation...")
+             ts = env.reset()
+             if hasattr(policy, "reset"):
+                 policy.reset()
+             try:
+                 for t in tqdm(range(max_timesteps)):
+                     start_time = time.time()
+-                    if save_dir != "":
++                    # if save_dir != "":
+                         # image_list.append(ts.observation["images"])
+                         # for name, image in ts.observation["images"].items():
+-                        coder.encode_frame(
+-                            np.concatenate(
+-                                list(ts.observation["images"].values()), axis=1
+-                            ),
+-                            timestamp=time.time_ns() // factor,
+-                        )
++                        # coder.encode_frame(
++                        #     np.concatenate(
++                        #         list(ts.observation["images"].values()), axis=1
++                        #     ),
++                        #     timestamp=time.time_ns() // factor,
++                        # )
++                        #
++                        # frame = np.concatenate(list(ts.observation["images"].values()), axis=1)
++                        #
++                        # if video_writer is None:
++                        #     h, w = frame.shape[:2]
++                        #     video_writer = cv2.VideoWriter(
++                        #         video_path,
++                        #         cv2.VideoWriter_fourcc(*"mp4v"),
++                        #         30,
++                        #         (w, h)
++                        #     )
++                        #
++                        # video_writer.write(frame)
++
+                     if showing_images:
+                         show_images(ts)
+                     # pre-process current observations
+@@ -278,10 +291,20 @@ def eval_bc(config, ckpt_name, env: CommonEnv):
+         rewards = np.array(rewards)
+         episode_return = np.sum(rewards[rewards != None])
+         episode_returns.append(episode_return)
+-        episode_highest_reward = np.max(rewards)
+-        highest_rewards.append(episode_highest_reward)
++        # episode_highest_reward = np.max(rewards)
++        # highest_rewards.append(episode_highest_reward)
++        # logger.info(
++        #     f"Rollout {rollout_id}\n{episode_return=}, {episode_highest_reward=}, {env_max_reward=}, Success: {episode_highest_reward == env_max_reward}"
++        # )
++
++        success = env.check_success()
++
++        highest_rewards.append(int(success))
++
+         logger.info(
+-            f"Rollout {rollout_id}\n{episode_return=}, {episode_highest_reward=}, {env_max_reward=}, Success: {episode_highest_reward == env_max_reward}"
++            f"Rollout {rollout_id}\n"
++            f"{episode_return=}, "
++            f"success={success}"
+         )
+ 
+         # saving evaluation results
+@@ -302,10 +325,13 @@ def eval_bc(config, ckpt_name, env: CommonEnv):
+             )
+             video_path = f"{os.path.join(save_dir, dataset_name)}.mp4"
+             logger.info(f"Video saved to {video_path}")
+-            coder.end(video_path)
++            # coder.end(video_path)
++
++            # video_writer.release()
+ 
+     if num_rollouts > 0:
+-        success_rate = np.mean(np.array(highest_rewards) == env_max_reward)
++        # success_rate = np.mean(np.array(highest_rewards) == env_max_reward)
++        success_rate = np.mean(highest_rewards)
+         avg_return = np.mean(episode_returns)
+         summary_str = (
+             f"\nSuccess rate: {success_rate}\nAverage return: {avg_return}\n\n"
+diff --git a/utils/utils.py b/utils/utils.py
+index 22f4220..14ff93e 100644
+--- a/utils/utils.py
++++ b/utils/utils.py
+@@ -21,9 +21,9 @@ from torch.utils.data import DataLoader
+ from visualize_episodes import save_videos
+ from collections import Counter, defaultdict
+ from functools import wraps
+-from mcap_data_loader.utils.av_coder import AvCoder
+-from mcap_data_loader.schemas.airbot_fbs.FloatArray import FloatArray
+-from mcap.reader import make_reader
++# from mcap_data_loader.utils.av_coder import AvCoder
++# from mcap_data_loader.schemas.airbot_fbs.FloatArray import FloatArray
++# from mcap.reader import make_reader
+ 
+ 
+ logger = logging.getLogger(__name__)
+@@ -274,11 +274,17 @@ def get_pkl_info(path):
+ 
+ 
+ def get_init_states(data_config: Union[dict, str], episode_idx: Optional[int] = None):
++
+     """Get initial joint positions and actions from the dataset."""
+ 
+     if isinstance(episode_idx, int):
+         dir = data_config["dataset_dir"]
+         data_type = data_config["data_type"]
++
++        print("DEBUG data_type:", data_config.get("data_type"))
++        print("DEBUG episode_idx:", episode_idx)
++        print("DEBUG dataset_dir:", data_config.get("dataset_dir"))
++
+         if data_type == "hdf5":
+             dataset_path = os.path.join(dir, f"episode_{episode_idx}.hdf5")
+             dataset_path = os.path.abspath(dataset_path)

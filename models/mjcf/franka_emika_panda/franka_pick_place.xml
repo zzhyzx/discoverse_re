@@ -1,0 +1,38 @@
+<mujoco model="franka_pick_place">
+    <compiler angle="radian" meshdir="../../meshes/franka_emika_panda" autolimits="true"/>
+
+    <!-- 引入 Franka Panda -->
+    <include file="panda.xml"/>
+
+    <visual>
+        <global azimuth="120" elevation="-20"/>
+    </visual>
+
+    <worldbody>
+        <light directional="true" diffuse=".9 .9 .9" pos="0 0 5.0" dir="0 0 -1"/>
+        <geom name="floor" pos="0 0 0" size="1 1 .05" type="plane" condim="3"/>
+
+        <!-- OpenVLA 专用主相机 -->
+        <camera name="primary_view" pos="0.9 0.0 0.6" xyaxes="0 1 0 -0.6 0 0.8" fovy="45"/>
+
+        <!-- 1. 桌子 (固定在世界中) -->
+        <body name="table" pos="0.5 0 0.2">
+            <geom name="table_geom" type="box" size="0.4 0.4 0.2" rgba="0.8 0.6 0.4 1" condim="3"/>
+        </body>
+
+        <!-- 2. 咖啡杯 (挪出来了！作为 worldbody 的直接子节点) -->
+        <!-- 绝对坐标: x=0.5, y=-0.15, z=0.45 (桌子高度0.4 + 悬空0.05) -->
+        <body name="coffee_cup" pos="0.5 -0.15 0.45">
+            <freejoint/>
+            <geom name="cup_geom" type="cylinder" size="0.03 0.05" rgba="0.9 0.1 0.1 1" mass="0.1"/>
+        </body>
+
+        <!-- 3. 盘子 (挪出来了！作为 worldbody 的直接子节点) -->
+        <!-- 绝对坐标: x=0.5, y=0.15, z=0.41 (桌子高度0.4 + 盘子厚度0.01) -->
+        <body name="plate" pos="0.5 0.15 0.41">
+            <!-- 盘子通常是固定的，不需要 freejoint -->
+            <geom name="plate_geom" type="cylinder" size="0.08 0.01" rgba="0.9 0.9 0.9 1"/>
+        </body>
+
+    </worldbody>
+</mujoco>

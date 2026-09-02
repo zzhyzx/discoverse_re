@@ -1,0 +1,87 @@
+<mujoco model="franka_push_task">
+
+    <compiler angle="radian"
+              meshdir="../../meshes/franka_emika_panda"
+              autolimits="true"/>
+
+    <!-- 引入 Panda -->
+    <include file="panda.xml"/>
+
+    <visual>
+        <global azimuth="120" elevation="-20"/>
+    </visual>
+
+    <worldbody>
+
+        <!-- 光源 -->
+        <light directional="true"
+               diffuse=".9 .9 .9"
+               pos="0 0 5"
+               dir="0 0 -1"/>
+
+        <!-- 地面 -->
+        <geom name="floor"
+              type="plane"
+              pos="0 0 0"
+              size="2 2 0.05"/>
+
+        <!-- 主相机 -->
+        <camera name="primary_view"
+                pos="1.0 0.0 0.8"
+                xyaxes="0 1 0 -0.6 0 0.8"
+                fovy="45"/>
+
+        <!-- ===================== -->
+        <!-- 桌子 -->
+        <!-- ===================== -->
+        <body name="table" pos="0.55 0 0.2">
+            <geom name="table_geom"
+                  type="box"
+                  size="0.45 0.35 0.2"
+                  rgba="0.75 0.55 0.35 1"/>
+        </body>
+
+        <!-- ===================== -->
+        <!-- 鼠标垫（薄） -->
+        <!-- 桌面高度=0.4 -->
+        <!-- ===================== -->
+        <body name="mousepad" pos="0.55 0 0.402">
+            <geom name="mousepad_geom"
+                  type="box"
+                  size="0.12 0.18 0.002"
+                  rgba="0.1 0.1 0.1 1"
+                  contype="0"
+                  conaffinity="0"/>
+        </body>
+
+
+
+        <!-- ===================== -->
+        <!-- 鼠标（先用 box 代替） -->
+        <!-- 可自由推动 -->
+        <!-- ===================== -->
+        <body name="mouse" pos="0.52 0 0.418">
+            <freejoint/>
+            <geom name="mouse_geom"
+                  type="box"
+                  size="0.03 0.02 0.015"
+                  mass="0.12"
+                  rgba="0.2 0.2 0.25 1"
+                  friction="0.8 0.01 0.001"/>
+        </body>
+
+        <!-- ===================== -->
+        <!-- 目标区域（绿色框） -->
+        <!-- ===================== -->
+        <body name="target_zone" pos="0.72 0 0.405">
+            <geom name="target_geom"
+                  type="box"
+                  size="0.05 0.05 0.001"
+                  rgba="0 1 0 0.4"
+                  contype="0"
+                  conaffinity="0"/>
+        </body>
+
+    </worldbody>
+
+</mujoco>
