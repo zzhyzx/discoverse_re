@@ -7,6 +7,7 @@ import numpy as np
 import torch
 from dataclasses import dataclass
 from diff_gaussian_rasterization import GaussianRasterizer as GausssianRasterizer_3d
+from diff_gaussian_rasterization import _C as rasterizer_extension
 
 @dataclass
 class GaussianDataCUDA:
@@ -37,6 +38,7 @@ class GaussianRasterizationSettingsStorage:
     campos : torch.Tensor
     prefiltered : bool
     debug : bool
+    znear : float = 0.01
 
 def gaus_cuda_from_cpu(gau: util_gau) -> GaussianDataCUDA:
     gaus =  GaussianDataCUDA(
@@ -52,6 +54,12 @@ def gaus_cuda_from_cpu(gau: util_gau) -> GaussianDataCUDA:
 class CUDARenderer:
     def __init__(self, w, h):
         super().__init__()
+        if not getattr(rasterizer_extension, "supports_configurable_znear", False):
+            raise RuntimeError(
+                "The CUDA Gaussian rasterizer must be rebuilt for configurable near clipping. "
+                "Run: python -m pip install --no-build-isolation --no-deps "
+                "--force-reinstall ./submodules/diff-gaussian-rasterization"
+            )
         raster_settings = {
             "image_height": int(h),
             "image_width": int(w),
@@ -119,14 +127,9 @@ class CUDARenderer:
         self.raster_settings.image_width = int(w)
 
     def update_camera_pose(self, camera: util_gau.Camera):
-        self.need_rerender = True
         view_matrix = camera.get_view_matrix()
         view_matrix[[0,2], :] *= -1
-        
-        proj = camera.get_project_matrix() @ view_matrix
-        self.raster_settings.viewmatrix = torch.tensor(view_matrix.T).float().cuda()
-        self.raster_settings.campos = torch.tensor(camera.position).float().cuda()
-        self.raster_settings.projmatrix = torch.tensor(proj.T).float().cuda()
+        self._set_camera_view(camera, view_matrix)
 
     def update_camera_pose_from_topic(self, camera: util_gau.Camera, rmat, trans):
         self.need_rerender = True
@@ -144,15 +147,29 @@ class CUDARenderer:
                               [ 0.0,  0.0,  0.0,  1.0]])
         view_matrix = transpose @ np.linalg.inv(Tmat)
 
-        proj = camera.get_project_matrix() @ view_matrix
-        self.raster_settings.projmatrix = torch.tensor(proj.T).float().cuda()
+        self._set_camera_view(camera, view_matrix)
+
+    def _set_camera_view(self, camera, view_matrix):
         self.raster_settings.viewmatrix = torch.tensor(view_matrix.T).float().cuda()
         self.raster_settings.campos = torch.tensor(camera.position).float().cuda()
+        self.update_camera_intrin(camera)
 
     def update_camera_intrin(self, camera: util_gau.Camera):
         hfovx, hfovy, focal = camera.get_htanfovxy_focal()
         self.raster_settings.tanfovx = hfovx
         self.raster_settings.tanfovy = hfovy
+        self.raster_settings.znear = camera.znear
+        self.raster_settings.image_height = int(camera.h)
+        self.raster_settings.image_width = int(camera.w)
+        # CUDA stores transposed matrices: (P @ V).T == V.T @ P.T.
+        # Rebuild even if the camera pose has not changed.
+        view = self.raster_settings.viewmatrix
+        if view is not None:
+            projection = torch.as_tensor(
+                camera.get_project_matrix().T, device=view.device, dtype=view.dtype
+            )
+            self.raster_settings.projmatrix = (view @ projection).contiguous()
+        self.need_rerender = True
 
     def draw(self, render_depth=False):
         if not self.need_rerender:
@@ -160,8 +177,6 @@ class CUDARenderer:
                 return self.render_depth_img
             else:
                 return self.render_rgb_img
-
-        self.need_rerender = False
 
         rasterizer = GausssianRasterizer_3d(raster_settings=self.raster_settings)
 
@@ -179,6 +194,9 @@ class CUDARenderer:
 
             self.render_depth_img = depth_img.permute(1, 2, 0).contiguous().cpu().numpy()
             self.render_rgb_img = (255. * torch.clamp(color_img, 0.0, 1.0)).to(torch.uint8).permute(1, 2, 0).contiguous().cpu().numpy()
+
+        # Failed renders must not leave a stale image marked as current.
+        self.need_rerender = False
 
         if render_depth:
             return self.render_depth_img

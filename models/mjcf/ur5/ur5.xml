@@ -1,0 +1,153 @@
+<mujoco model="ur5">
+  <compiler angle="radian" meshdir="./" autolimits="true"/>
+
+  <option integrator="implicitfast" cone="elliptic" impratio="10"/>
+
+  <default>
+    <default class="ur5">
+      <joint armature="0.1" damping="1" frictionloss="0.1"/>
+      <site size="0.005" rgba="1 0 0 0.5" group="4"/>
+      <default class="size3">
+        <general gaintype="fixed" biastype="affine"
+          ctrlrange="-6.28319 6.28319"
+          gainprm="2000"
+          biasprm="0 -2000 -400"
+          forcerange="-150 150"/>
+        <default class="size3_limited">
+          <general ctrlrange="-3.14159 3.14159"/>
+        </default>
+      </default>
+      <default class="size1">
+        <general gaintype="fixed" biastype="affine"
+          ctrlrange="-6.28319 6.28319"
+          gainprm="500"
+          biasprm="0 -500 -100"
+          forcerange="-28 28"/>
+      </default>
+    </default>
+  </default>
+
+  <asset>
+    <model name="robotiq_2f85" file="robotiq_2f85/2f85.xml"/>
+    <material name="black" rgba="0.033 0.033 0.033 1" specular="0.5" shininess="0.25"/>
+    <material name="jointgray" rgba="0.278 0.278 0.278 1" specular="0.5" shininess="0.25"/>
+    <material name="linkgray" rgba="0.82 0.82 0.82 1" specular="0.5" shininess="0.25"/>
+    <material name="urblue" rgba="0.49 0.678 0.8 1" specular="0.5" shininess="0.25"/>
+    <mesh name="base_visual_0" content_type="model/obj" file="meshes_files/visual_split_corrected/base_visual_0.obj"/>
+    <mesh name="base_collision" content_type="model/stl" file="meshes_files/collision/base_collision.stl"/>
+    <mesh name="shoulder_visual_0" content_type="model/obj" file="meshes_files/visual_split_corrected/shoulder_visual_0.obj"/>
+    <mesh name="shoulder_visual_1" content_type="model/obj" file="meshes_files/visual_split_corrected/shoulder_visual_1.obj"/>
+    <mesh name="shoulder_collision" content_type="model/stl" file="meshes_files/collision/shoulder_collision.stl"/>
+    <mesh name="upperarm_visual_0" content_type="model/obj" file="meshes_files/visual_split_corrected/upperarm_visual_0.obj"/>
+    <mesh name="upperarm_visual_1" content_type="model/obj" file="meshes_files/visual_split_corrected/upperarm_visual_1.obj"/>
+    <mesh name="upperarm_visual_2" content_type="model/obj" file="meshes_files/visual_split_corrected/upperarm_visual_2.obj"/>
+    <mesh name="upperarm_visual_3" content_type="model/obj" file="meshes_files/visual_split_corrected/upperarm_visual_3.obj"/>
+    <mesh name="upperarm_visual_4" content_type="model/obj" file="meshes_files/visual_split_corrected/upperarm_visual_4.obj"/>
+    <mesh name="upperarm_collision" content_type="model/stl" file="meshes_files/collision/upperarm_collision.stl"/>
+    <mesh name="forearm_visual_0" content_type="model/obj" file="meshes_files/visual_split_corrected/forearm_visual_0.obj"/>
+    <mesh name="forearm_visual_1" content_type="model/obj" file="meshes_files/visual_split_corrected/forearm_visual_1.obj"/>
+    <mesh name="forearm_visual_2" content_type="model/obj" file="meshes_files/visual_split_corrected/forearm_visual_2.obj"/>
+    <mesh name="forearm_visual_3" content_type="model/obj" file="meshes_files/visual_split_corrected/forearm_visual_3.obj"/>
+    <mesh name="forearm_collision" content_type="model/stl" file="meshes_files/collision/forearm_collision.stl"/>
+    <mesh name="wrist1_visual_0" content_type="model/obj" file="meshes_files/visual_split_corrected/wrist1_visual_0.obj"/>
+    <mesh name="wrist1_visual_1" content_type="model/obj" file="meshes_files/visual_split_corrected/wrist1_visual_1.obj"/>
+    <mesh name="wrist1_collision" content_type="model/stl" file="meshes_files/collision/wrist1_collision.stl"/>
+    <mesh name="wrist2_visual_0" content_type="model/obj" file="meshes_files/visual_split_corrected/wrist2_visual_0.obj"/>
+    <mesh name="wrist2_visual_1" content_type="model/obj" file="meshes_files/visual_split_corrected/wrist2_visual_1.obj"/>
+    <mesh name="wrist2_collision" content_type="model/stl" file="meshes_files/collision/wrist2_collision.stl"/>
+    <mesh name="wrist3_visual_0" content_type="model/obj" file="meshes_files/visual_split_corrected/wrist3_visual_0.obj"/>
+    <mesh name="wrist3_collision" content_type="model/stl" file="meshes_files/collision/wrist3_collision.stl"/>
+  </asset>
+
+  <worldbody>
+    <light name="spotlight" mode="targetbodycom" target="wrist_2_link" pos="0 -1 2"/>
+    <body name="base_link" childclass="ur5">
+      <body name="base_link_inertia" quat="0 0 0 1">
+        <inertial pos="0 0 0" quat="0.5 0.5 -0.5 0.5" mass="4" diaginertia="0.0072 0.00443333 0.00443333"/>
+        <geom quat="0 0 0 1" type="mesh" contype="0" conaffinity="0" group="2" density="0" material="jointgray" mesh="base_visual_0"/>
+        <geom quat="0 0 0 1" type="mesh" group="3" rgba="0 0 0 0" mesh="base_collision"/>
+        <body name="shoulder_link" pos="0 0 0.089159">
+          <inertial pos="0 -0.00193 -0.02561" mass="3.7" diaginertia="0.0149724 0.0149724 0.0104063"/>
+          <joint name="shoulder_pan_joint" class="size3" pos="0 0 0" axis="0 0 1" range="-6.28319 6.28319" actuatorfrcrange="-150 150"/>
+          <geom quat="0 0 0 1" type="mesh" contype="0" conaffinity="0" group="2" density="0" material="jointgray" mesh="shoulder_visual_0"/>
+          <geom quat="0 0 0 1" type="mesh" contype="0" conaffinity="0" group="2" density="0" material="urblue" mesh="shoulder_visual_1"/>
+          <geom quat="0 0 0 1" type="mesh" group="3" rgba="0 0 0 0" mesh="shoulder_collision"/>
+          <body name="upper_arm_link" quat="0.707107 0.707107 0 0">
+            <inertial pos="-0.2125 0 0.11336" mass="8.393" diaginertia="0.133886 0.133886 0.0151074"/>
+            <joint name="shoulder_lift_joint" class="size3" pos="0 0 0" axis="0 0 1" range="-6.28319 6.28319" actuatorfrcrange="-150 150"/>
+            <geom pos="0 0 0.13585" quat="0.5 0.5 -0.5 -0.5" type="mesh" contype="0" conaffinity="0" group="2" density="0" material="jointgray" mesh="upperarm_visual_0"/>
+            <geom pos="0 0 0.13585" quat="0.5 0.5 -0.5 -0.5" type="mesh" contype="0" conaffinity="0" group="2" density="0" material="urblue" mesh="upperarm_visual_1"/>
+            <geom pos="0 0 0.13585" quat="0.5 0.5 -0.5 -0.5" type="mesh" contype="0" conaffinity="0" group="2" density="0" material="jointgray" mesh="upperarm_visual_2"/>
+            <geom pos="0 0 0.13585" quat="0.5 0.5 -0.5 -0.5" type="mesh" contype="0" conaffinity="0" group="2" density="0" material="linkgray" mesh="upperarm_visual_3"/>
+            <geom pos="0 0 0.13585" quat="0.5 0.5 -0.5 -0.5" type="mesh" contype="0" conaffinity="0" group="2" density="0" material="urblue" mesh="upperarm_visual_4"/>
+            <geom pos="0 0 0.13585" quat="0.5 0.5 -0.5 -0.5" type="mesh" group="3" rgba="0 0 0 0" mesh="upperarm_collision"/>
+            <body name="forearm_link" pos="-0.425 0 0">
+              <inertial pos="-0.24225 0 0.0265" mass="2.33" diaginertia="0.0312168 0.0312168 0.004095"/>
+              <joint name="elbow_joint" class="size3_limited" pos="0 0 0" axis="0 0 1" range="-3.14159 3.14159" actuatorfrcrange="-150 150"/>
+              <geom pos="0 0 0.0165" quat="0.5 0.5 -0.5 -0.5" type="mesh" contype="0" conaffinity="0" group="2" density="0" material="urblue" mesh="forearm_visual_0"/>
+              <geom pos="0 0 0.0165" quat="0.5 0.5 -0.5 -0.5" type="mesh" contype="0" conaffinity="0" group="2" density="0" material="linkgray" mesh="forearm_visual_1"/>
+              <geom pos="0 0 0.0165" quat="0.5 0.5 -0.5 -0.5" type="mesh" contype="0" conaffinity="0" group="2" density="0" material="jointgray" mesh="forearm_visual_2"/>
+              <geom pos="0 0 0.0165" quat="0.5 0.5 -0.5 -0.5" type="mesh" contype="0" conaffinity="0" group="2" density="0" material="jointgray" mesh="forearm_visual_3"/>
+              <geom pos="0 0 0.0165" quat="0.5 0.5 -0.5 -0.5" type="mesh" group="3" rgba="0 0 0 0" mesh="forearm_collision"/>
+              <body name="wrist_1_link" pos="-0.39225 0 0.10915">
+                <inertial pos="0 -0.01634 -0.0018" quat="0.5 0.5 -0.5 0.5" mass="1.219" diaginertia="0.0021942 0.00201389 0.00201389"/>
+                <joint name="wrist_1_joint" class="size1" pos="0 0 0" axis="0 0 1" range="-6.28319 6.28319" actuatorfrcrange="-28 28"/>
+                <geom pos="0 0 -0.093" quat="0.707107 0.707107 0 0" type="mesh" contype="0" conaffinity="0" group="2" density="0" material="jointgray" mesh="wrist1_visual_0"/>
+                <geom pos="0 0 -0.093" quat="0.707107 0.707107 0 0" type="mesh" contype="0" conaffinity="0" group="2" density="0" material="urblue" mesh="wrist1_visual_1"/>
+                <geom pos="0 0 -0.093" quat="0.707107 0.707107 0 0" type="mesh" group="3" rgba="0 0 0 0" mesh="wrist1_collision"/>
+                <body name="wrist_2_link" pos="0 -0.09465 -1.9413e-11" quat="0.707107 0.707107 0 0">
+                  <inertial pos="0 0.01634 -0.0018" quat="0.5 0.5 -0.5 0.5" mass="1.219" diaginertia="0.0021942 0.00183104 0.00183104"/>
+                  <joint name="wrist_2_joint" class="size1" pos="0 0 0" axis="0 0 1" range="-6.28319 6.28319" actuatorfrcrange="-28 28"/>
+                  <geom pos="0 0 -0.095" quat="1 0 0 0" type="mesh" contype="0" conaffinity="0" group="2" density="0" material="jointgray" mesh="wrist2_visual_0"/>
+                  <geom pos="0 0 -0.095" quat="1 0 0 0" type="mesh" contype="0" conaffinity="0" group="2" density="0" material="urblue" mesh="wrist2_visual_1"/>
+                  <geom pos="0 0 -0.095" quat="1 0 0 0" type="mesh" group="3" rgba="0 0 0 0" mesh="wrist2_collision"/>
+                  <body name="wrist_3_link" pos="0 0.0823 -1.688e-11" quat="0.707107 -0.707107 0 0">
+                    <inertial pos="0 0 -0.001159" quat="0.5 0.5 -0.5 0.5" mass="0.1879" diaginertia="0.000132117 8.06248e-05 8.06248e-05"/>
+                    <joint name="wrist_3_joint" class="size1" pos="0 0 0" axis="0 0 1" range="-6.28319 6.28319" actuatorfrcrange="-28 28"/>
+                    <geom pos="0 0 -0.0818" quat="0.707107 0.707107 0 0" type="mesh" contype="0" conaffinity="0" group="2" density="0" material="jointgray" mesh="wrist3_visual_0"/>
+                    <geom pos="0 0 -0.0818" quat="0.707107 0.707107 0 0" type="mesh" group="3" rgba="0 0 0 0" mesh="wrist3_collision"/>
+                    <body name="ft_frame" quat="0 1 0 0"/>
+                    <body name="flange" quat="0.5 -0.5 -0.5 -0.5">
+                      <body name="tool0" quat="0.5 0.5 0.5 0.5">
+                        <site name="attachment_site"/>
+                        <!-- Approximate wrist camera rig; visual only, zero added mass.
+                             Housing front is at tool0-local (0.05, 0, 0.10).
+                             Dimensions and orientation are NOT calibrated. -->
+                        <geom name="wrist_camera_case" type="box" pos="0.05 0 0.087" size="0.018 0.022 0.010" rgba="0.65 0.65 0.65 1" contype="0" conaffinity="0" density="0" group="2"/>
+                        <geom name="wrist_camera_lens" type="cylinder" pos="0.05 0 0.098" size="0.006 0.002" rgba="0.04 0.04 0.04 1" contype="0" conaffinity="0" density="0" group="2"/>
+                        <geom name="wrist_camera_bracket" type="box" pos="0.075 0 0.05" size="0.003 0.022 0.05" rgba="0.6 0.6 0.6 1" contype="0" conaffinity="0" density="0" group="2"/>
+                        <frame name="robotiq_mount">
+                          <attach model="robotiq_2f85" body="base_mount" prefix="gripper_"/>
+                        </frame>
+                      </body>
+                    </body>
+                  </body>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="base" quat="0 0 0 1"/>
+    </body>
+  </worldbody>
+
+  <contact>
+    <exclude body1="base_link_inertia" body2="shoulder_link"/>
+    <exclude body1="shoulder_link" body2="upper_arm_link"/>
+    <exclude body1="upper_arm_link" body2="forearm_link"/>
+    <exclude body1="forearm_link" body2="wrist_1_link"/>
+    <exclude body1="wrist_1_link" body2="wrist_2_link"/>
+    <exclude body1="wrist_2_link" body2="wrist_3_link"/>
+  </contact>
+
+  <actuator>
+    <general class="size3" name="shoulder_pan" joint="shoulder_pan_joint"/>
+    <general class="size3" name="shoulder_lift" joint="shoulder_lift_joint"/>
+    <general class="size3_limited" name="elbow" joint="elbow_joint"/>
+    <general class="size1" name="wrist_1" joint="wrist_1_joint"/>
+    <general class="size1" name="wrist_2" joint="wrist_2_joint"/>
+    <general class="size1" name="wrist_3" joint="wrist_3_joint"/>
+  </actuator>
+
+</mujoco>

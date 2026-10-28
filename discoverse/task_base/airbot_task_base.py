@@ -12,19 +12,26 @@ import av
 
 class PyavImageEncoder:
 
-    def __init__(self, width, height, save_path, id):
+    def __init__(self, width, height, save_path, id, fps=None, crf=None, preset="fast"):
         self.width = width
         self.height = height
         self.av_file_path = os.path.join(save_path, f"cam_{id}.mp4")
         if os.path.exists(self.av_file_path):
             os.remove(self.av_file_path)
         container = av.open(self.av_file_path, "w", format="mp4")
-        stream: av.video.stream.VideoStream = container.add_stream("h264", options={"preset": "fast"})
+        options = {"preset": preset}
+        if crf is not None:
+            options["crf"] = str(crf)
+        kwargs = {} if fps is None else {"rate": fractions.Fraction(str(fps))}
+        stream: av.video.stream.VideoStream = container.add_stream("h264", options=options, **kwargs)
         stream.width = width
         stream.height = height
         stream.pix_fmt = "yuv420p"
         self._time_base = int(1e6)
         stream.time_base = fractions.Fraction(1, self._time_base)
+        if fps is not None:
+            # Encoder time base must match capture, not FFmpeg's default 24Hz.
+            stream.codec_context.time_base = 1 / fractions.Fraction(str(fps))
         self.container = container
         self.stream = stream
         self.start_time = None
@@ -35,7 +42,7 @@ class PyavImageEncoder:
         self._cnt += 1
         if self.start_time is None:
             self.start_time = timestamp
-            self.last_time = 0
+            self.last_time = float("-inf")
             self.container.metadata["comment"] = str({"base_stamp": int(self.start_time * self._time_base)})
         frame = av.VideoFrame.from_ndarray(image, format="rgb24")
         cur_time = timestamp

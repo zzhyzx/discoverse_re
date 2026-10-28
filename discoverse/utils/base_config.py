@@ -16,5 +16,7 @@ class BaseConfig:
     obj_list       = []
     gs_model_dict  = {}
     use_gaussian_renderer = False
+    gs_background_sh_degree = 0
+    gs_znear = 0.01  # Metres; Gaussian-centre near clipping and projection plane.
     enable_render = True
     max_render_depth = 5.0

@@ -1,0 +1,318 @@
+diff --git a/cuda_rasterizer/auxiliary.h b/cuda_rasterizer/auxiliary.h
+index 4d4b9b7..2a87ef0 100644
+--- a/cuda_rasterizer/auxiliary.h
++++ b/cuda_rasterizer/auxiliary.h
+@@ -141,7 +141,8 @@ __forceinline__ __device__ bool in_frustum(int idx,
+ 	const float* viewmatrix,
+ 	const float* projmatrix,
+ 	bool prefiltered,
+-	float3& p_view)
++	float3& p_view,
++	const float znear)
+ {
+ 	float3 p_orig = { orig_points[3 * idx], orig_points[3 * idx + 1], orig_points[3 * idx + 2] };
+ 
+@@ -151,7 +152,8 @@ __forceinline__ __device__ bool in_frustum(int idx,
+ 	float3 p_proj = { p_hom.x * p_w, p_hom.y * p_w, p_hom.z * p_w };
+ 	p_view = transformPoint4x3(p_orig, viewmatrix);
+ 
+-	if (p_view.z <= 0.2f)// || ((p_proj.x < -1.3 || p_proj.x > 1.3 || p_proj.y < -1.3 || p_proj.y > 1.3)))
++	// Cull Gaussian centres using the same near plane as the camera.
++	if (p_view.z <= znear)
+ 	{
+ 		if (prefiltered)
+ 		{
+@@ -172,4 +174,4 @@ throw std::runtime_error(cudaGetErrorString(ret)); \
+ } \
+ }
+ 
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/cuda_rasterizer/forward.cu b/cuda_rasterizer/forward.cu
+index dc28500..dc61aa7 100644
+--- a/cuda_rasterizer/forward.cu
++++ b/cuda_rasterizer/forward.cu
+@@ -177,7 +177,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
+ 	float4* conic_opacity,
+ 	const dim3 grid,
+ 	uint32_t* tiles_touched,
+-	bool prefiltered)
++	bool prefiltered,
++	float znear)
+ {
+ 	auto idx = cg::this_grid().thread_rank();
+ 	if (idx >= P)
+@@ -190,7 +191,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
+ 
+ 	// Perform near culling, quit if outside.
+ 	float3 p_view;
+-	if (!in_frustum(idx, orig_points, viewmatrix, projmatrix, prefiltered, p_view))
++	if (!in_frustum(idx, orig_points, viewmatrix, projmatrix, prefiltered, p_view, znear))
+ 		return;
+ 
+ 	// Transform point by projecting
+@@ -434,7 +435,8 @@ void FORWARD::preprocess(int P, int D, int M,
+ 	float4* conic_opacity,
+ 	const dim3 grid,
+ 	uint32_t* tiles_touched,
+-	bool prefiltered)
++	bool prefiltered,
++	float znear)
+ {
+ 	preprocessCUDA<NUM_CHANNELS> << <(P + 255) / 256, 256 >> > (
+ 		P, D, M,
+@@ -461,6 +463,7 @@ void FORWARD::preprocess(int P, int D, int M,
+ 		conic_opacity,
+ 		grid,
+ 		tiles_touched,
+-		prefiltered
++		prefiltered,
++		znear
+ 		);
+-}
+\ No newline at end of file
++}
+diff --git a/cuda_rasterizer/forward.h b/cuda_rasterizer/forward.h
+index 6fa308f..fb5820a 100644
+--- a/cuda_rasterizer/forward.h
++++ b/cuda_rasterizer/forward.h
+@@ -45,7 +45,8 @@ namespace FORWARD
+ 		float4* conic_opacity,
+ 		const dim3 grid,
+ 		uint32_t* tiles_touched,
+-		bool prefiltered);
++		bool prefiltered,
++		float znear);
+ 
+ 	// Main rasterization method.
+ 	void render(
+@@ -65,4 +66,4 @@ namespace FORWARD
+ }
+ 
+ 
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/cuda_rasterizer/rasterizer.h b/cuda_rasterizer/rasterizer.h
+index 10270f6..93f8797 100644
+--- a/cuda_rasterizer/rasterizer.h
++++ b/cuda_rasterizer/rasterizer.h
+@@ -26,7 +26,8 @@ namespace CudaRasterizer
+ 			float* means3D,
+ 			float* viewmatrix,
+ 			float* projmatrix,
+-			bool* present);
++			bool* present,
++			float znear = 0.01f);
+ 
+ 		static int forward(
+ 			std::function<char* (size_t)> geometryBuffer,
+@@ -52,7 +53,8 @@ namespace CudaRasterizer
+ 			float* out_depth,
+ 			float* out_alpha,
+ 			int* radii = nullptr,
+-			bool debug = false);
++			bool debug = false,
++			float znear = 0.01f);
+ 
+ 		static void backward(
+ 			const int P, int D, int M, int R,
+@@ -91,4 +93,4 @@ namespace CudaRasterizer
+ 	};
+ };
+ 
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/cuda_rasterizer/rasterizer_impl.cu b/cuda_rasterizer/rasterizer_impl.cu
+index f17793a..0bbc9d5 100644
+--- a/cuda_rasterizer/rasterizer_impl.cu
++++ b/cuda_rasterizer/rasterizer_impl.cu
+@@ -55,14 +55,15 @@ __global__ void checkFrustum(int P,
+ 	const float* orig_points,
+ 	const float* viewmatrix,
+ 	const float* projmatrix,
+-	bool* present)
++	bool* present,
++	float znear)
+ {
+ 	auto idx = cg::this_grid().thread_rank();
+ 	if (idx >= P)
+ 		return;
+ 
+ 	float3 p_view;
+-	present[idx] = in_frustum(idx, orig_points, viewmatrix, projmatrix, false, p_view);
++	present[idx] = in_frustum(idx, orig_points, viewmatrix, projmatrix, false, p_view, znear);
+ }
+ 
+ // Generates one key/value pair for all Gaussian / tile overlaps. 
+@@ -143,13 +144,14 @@ void CudaRasterizer::Rasterizer::markVisible(
+ 	float* means3D,
+ 	float* viewmatrix,
+ 	float* projmatrix,
+-	bool* present)
++	bool* present,
++	float znear)
+ {
+ 	checkFrustum << <(P + 255) / 256, 256 >> > (
+ 		P,
+ 		means3D,
+ 		viewmatrix, projmatrix,
+-		present);
++		present, znear);
+ }
+ 
+ CudaRasterizer::GeometryState CudaRasterizer::GeometryState::fromChunk(char*& chunk, size_t P)
+@@ -218,7 +220,8 @@ int CudaRasterizer::Rasterizer::forward(
+ 	float* out_depth,
+ 	float* out_alpha,
+ 	int* radii,
+-	bool debug)
++	bool debug,
++	float znear)
+ {
+ 	const float focal_y = height / (2.0f * tan_fovy);
+ 	const float focal_x = width / (2.0f * tan_fovx);
+@@ -270,7 +273,7 @@ int CudaRasterizer::Rasterizer::forward(
+ 		geomState.conic_opacity,
+ 		tile_grid,
+ 		geomState.tiles_touched,
+-		prefiltered
++		prefiltered, znear
+ 	), debug)
+ 
+ 	// Compute prefix sum over full list of touched tile counts by Gaussians
+@@ -444,4 +447,4 @@ void CudaRasterizer::Rasterizer::backward(
+ 		dL_dsh,
+ 		(glm::vec3*)dL_dscale,
+ 		(glm::vec4*)dL_drot), debug)
+-}
+\ No newline at end of file
++}
+diff --git a/diff_gaussian_rasterization/__init__.py b/diff_gaussian_rasterization/__init__.py
+index 81b1ecb..6ab4c20 100644
+--- a/diff_gaussian_rasterization/__init__.py
++++ b/diff_gaussian_rasterization/__init__.py
+@@ -76,7 +76,8 @@ class _RasterizeGaussians(torch.autograd.Function):
+             raster_settings.sh_degree,
+             raster_settings.campos,
+             raster_settings.prefiltered,
+-            raster_settings.debug
++            raster_settings.debug,
++            getattr(raster_settings, "znear", 0.01),
+         )
+ 
+         # Invoke C++/CUDA rasterizer
+@@ -170,6 +171,7 @@ class GaussianRasterizationSettings(NamedTuple):
+     campos : torch.Tensor
+     prefiltered : bool
+     debug : bool
++    znear : float = 0.01
+ 
+ class GaussianRasterizer(nn.Module):
+     def __init__(self, raster_settings):
+@@ -183,7 +185,8 @@ class GaussianRasterizer(nn.Module):
+             visible = _C.mark_visible(
+                 positions,
+                 raster_settings.viewmatrix,
+-                raster_settings.projmatrix)
++                raster_settings.projmatrix,
++                getattr(raster_settings, "znear", 0.01))
+             
+         return visible
+ 
+diff --git a/ext.cpp b/ext.cpp
+index d768779..85c6f4c 100644
+--- a/ext.cpp
++++ b/ext.cpp
+@@ -13,7 +13,8 @@
+ #include "rasterize_points.h"
+ 
+ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
++  m.attr("supports_configurable_znear") = true;
+   m.def("rasterize_gaussians", &RasterizeGaussiansCUDA);
+   m.def("rasterize_gaussians_backward", &RasterizeGaussiansBackwardCUDA);
+   m.def("mark_visible", &markVisible);
+-}
+\ No newline at end of file
++}
+diff --git a/rasterize_points.cu b/rasterize_points.cu
+index ee9f828..7da900b 100644
+--- a/rasterize_points.cu
++++ b/rasterize_points.cu
+@@ -10,6 +10,7 @@
+  */
+ 
+ #include <math.h>
++#include <cmath>
+ #include <torch/extension.h>
+ #include <cstdio>
+ #include <sstream>
+@@ -52,8 +53,10 @@ RasterizeGaussiansCUDA(
+ 	const int degree,
+ 	const torch::Tensor& campos,
+ 	const bool prefiltered,
+-	const bool debug)
++	const bool debug,
++	const float znear)
+ {
++  TORCH_CHECK(std::isfinite(znear) && znear > 0, "znear must be finite and positive");
+   if (means3D.ndimension() != 2 || means3D.size(1) != 3) {
+     AT_ERROR("means3D must have dimensions (num_points, 3)");
+   }
+@@ -113,7 +116,7 @@ RasterizeGaussiansCUDA(
+ 		out_depth.contiguous().data<float>(),
+ 		out_alpha.contiguous().data<float>(),
+ 		radii.contiguous().data<int>(),
+-		debug);
++		debug, znear);
+   }
+   return std::make_tuple(rendered, out_color, out_depth, out_alpha, radii, geomBuffer, binningBuffer, imgBuffer);
+ }
+@@ -210,8 +213,10 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
+ torch::Tensor markVisible(
+ 		torch::Tensor& means3D,
+ 		torch::Tensor& viewmatrix,
+-		torch::Tensor& projmatrix)
++		torch::Tensor& projmatrix,
++		const float znear)
+ { 
++  TORCH_CHECK(std::isfinite(znear) && znear > 0, "znear must be finite and positive");
+   const int P = means3D.size(0);
+   
+   torch::Tensor present = torch::full({P}, false, means3D.options().dtype(at::kBool));
+@@ -222,8 +227,8 @@ torch::Tensor markVisible(
+ 		means3D.contiguous().data<float>(),
+ 		viewmatrix.contiguous().data<float>(),
+ 		projmatrix.contiguous().data<float>(),
+-		present.contiguous().data<bool>());
++		present.contiguous().data<bool>(), znear);
+   }
+   
+   return present;
+-}
+\ No newline at end of file
++}
+diff --git a/rasterize_points.h b/rasterize_points.h
+index 2fc5e72..d582ee3 100644
+--- a/rasterize_points.h
++++ b/rasterize_points.h
+@@ -35,7 +35,8 @@ RasterizeGaussiansCUDA(
+ 	const int degree,
+ 	const torch::Tensor& campos,
+ 	const bool prefiltered,
+-	const bool debug);
++	const bool debug,
++	const float znear);
+ 
+ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor>
+  RasterizeGaussiansBackwardCUDA(
+@@ -67,4 +68,5 @@ std::tuple<torch::Tensor, torch::Tensor, torch::Tensor, torch::Tensor, torch::Te
+ torch::Tensor markVisible(
+ 		torch::Tensor& means3D,
+ 		torch::Tensor& viewmatrix,
+-		torch::Tensor& projmatrix);
+\ No newline at end of file
++		torch::Tensor& projmatrix,
++		const float znear);

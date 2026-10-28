@@ -1,0 +1,37 @@
+diff --git a/src/lerobot/policies/smolvla/modeling_smolvla.py b/src/lerobot/policies/smolvla/modeling_smolvla.py
+index a31e1b07..0199dc4b 100644
+--- a/src/lerobot/policies/smolvla/modeling_smolvla.py
++++ b/src/lerobot/policies/smolvla/modeling_smolvla.py
+@@ -457,13 +457,17 @@ class SmolVLAPolicy(PreTrainedPolicy):
+         state = self.prepare_state(batch)
+         lang_tokens, lang_masks = self.prepare_language(batch)
+         actions = self.prepare_action(batch)
+-        actions_is_pad = batch.get("actions_id_pad")
++        actions_is_pad = batch.get("action_is_pad")
+         loss_dict = {}
+         losses = self.model.forward(images, img_masks, lang_tokens, lang_masks, state, actions, noise, time)
+         loss_dict["losses_after_forward"] = losses.clone()
+ 
+         if actions_is_pad is not None:
++            if actions_is_pad.dtype != torch.bool or actions_is_pad.shape != losses.shape[:2]:
++                raise ValueError("action_is_pad must be boolean with shape (batch, chunk)")
+             in_episode_bound = ~actions_is_pad
++            if not in_episode_bound.any():
++                raise ValueError("Action batch contains no valid timesteps")
+             losses = losses * in_episode_bound.unsqueeze(-1)
+             loss_dict["losses_after_in_ep_bound"] = losses.clone()
+ 
+@@ -472,7 +476,12 @@ class SmolVLAPolicy(PreTrainedPolicy):
+         loss_dict["losses_after_rm_padding"] = losses.clone()
+ 
+         # For backward pass
+-        loss = losses.mean()
++        # Average only valid timesteps; padding must not dilute short episodes.
++        # Keep the existing action-dimension objective unchanged.
++        if actions_is_pad is None:
++            loss = losses.mean()
++        else:
++            loss = losses.sum() / (in_episode_bound.sum() * losses.shape[-1])
+         # For backward pass
+         loss_dict["loss"] = loss.item()
+         return loss, loss_dict

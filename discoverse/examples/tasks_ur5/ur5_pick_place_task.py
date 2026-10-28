@@ -75,7 +75,7 @@ class SimNode(UR5Base):
     def resetState(self):
         super().resetState()
         self.target_control[:6] = self.mj_data.qpos[:6]
-        self.target_control[6] = 0.04  # 夹爪张开
+        self.target_control[6] = 0.0  # Robotiq: 0=张开
         self.delay_cnt = 0
         self.domain_randomization()
         mujoco.mj_forward(self.mj_model, self.mj_data)
@@ -119,7 +119,7 @@ if __name__ == "__main__":
     os.makedirs(save_dir, exist_ok=True)
 
     sim_node = SimNode(cfg)
-    ik = UR5IK(sim_node.mj_model, sim_node.mj_data, ee_name="base_mount")
+    ik = UR5IK(sim_node.mj_model, sim_node.mj_data, ee_name="gripper_pinch", is_site=True)
     down_rot = Rotation.from_euler("xyz", [np.pi, 0, 0]).as_matrix()
 
     stm = SimpleStateMachine()
@@ -153,12 +153,12 @@ if __name__ == "__main__":
                     # 末端执行器目标位置 + 夹爪开合度
                     if stm.state_idx == 0:      # 移到物块上方
                         ee_pos = block_pos + np.array([0.0, 0.0, 0.15])
-                        sim_node.target_control[6] = 0.04   # 张开
+                        sim_node.target_control[6] = 0.0   # Robotiq: 0=张开
                     elif stm.state_idx == 1:    # 下降到物块（手指包住）
                         ee_pos = block_pos + np.array([0.0, 0.0, 0.02])
                     elif stm.state_idx == 2:    # 闭合夹爪抓取
                         ee_pos = block_pos + np.array([0.0, 0.0, 0.02])
-                        sim_node.target_control[6] = 0.0    # 闭合
+                        sim_node.target_control[6] = 255.0    # Robotiq: 255=闭合
                         sim_node.delay_cnt = int(0.5 / sim_node.delta_t)
                     elif stm.state_idx == 3:    # 抬起物块
                         ee_pos = block_pos + np.array([0.0, 0.0, 0.15])
@@ -168,7 +168,7 @@ if __name__ == "__main__":
                         ee_pos = target_pos + np.array([0.0, 0.0, 0.03])
                     elif stm.state_idx == 6:    # 张开夹爪释放
                         ee_pos = target_pos + np.array([0.0, 0.0, 0.03])
-                        sim_node.target_control[6] = 0.04
+                        sim_node.target_control[6] = 0.0  # Robotiq: 0=张开
                         sim_node.delay_cnt = int(0.5 / sim_node.delta_t)
                     elif stm.state_idx == 7:    # 抬起撤离
                         ee_pos = target_pos + np.array([0.0, 0.0, 0.15])

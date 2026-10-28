@@ -10,11 +10,12 @@ from discoverse.gaussian_renderer.renderer_cuda import CUDARenderer
 from discoverse import DISCOVERSE_ASSETS_DIR
 
 class GSRenderer:
-    def __init__(self, models_dict:dict, render_width=1920, render_height=1080):
+    def __init__(self, models_dict:dict, render_width=1920, render_height=1080, znear=0.01, background_sh_degree=0):
         self.width = render_width
         self.height = render_height
 
         self.camera = util_gau.Camera(self.height, self.width)
+        self.camera.update_clip_planes(znear)
 
         self.update_gauss_data = False
 
@@ -33,10 +34,10 @@ class GSRenderer:
 
         bg_key = "background"
         data_path = Path(os.path.join(gs_model_dir, models_dict[bg_key]))
-        gs = util_gau.load_ply(data_path)
+        gs = util_gau.load_ply(data_path, max_sh_degree=background_sh_degree)
         if "background_env" in models_dict.keys():
             bgenv_key = "background_env"
-            bgenv_gs = util_gau.load_ply(Path(os.path.join(gs_model_dir, models_dict[bgenv_key])))
+            bgenv_gs = util_gau.load_ply(Path(os.path.join(gs_model_dir, models_dict[bgenv_key])), max_sh_degree=background_sh_degree)
             gs.xyz = np.concatenate([gs.xyz, bgenv_gs.xyz], axis=0)
             gs.rot = np.concatenate([gs.rot, bgenv_gs.rot], axis=0)
             gs.scale = np.concatenate([gs.scale, bgenv_gs.scale], axis=0)
@@ -52,6 +53,9 @@ class GSRenderer:
             if k != "background" and k != "background_env":
                 data_path = Path(os.path.join(gs_model_dir, v))
                 gs = util_gau.load_ply(data_path)
+                # Dynamic assets retain DC colors; only the static background uses directional SH.
+                if background_sh_degree:
+                    gs.sh = np.pad(gs.sh, ((0, 0), (0, 3 * (background_sh_degree + 1) ** 2 - gs.sh.shape[1])))
                 self.gaussians_all[k] = gs
                 self.gaussians_idx[k] = idx_sum
                 self.gaussians_size[k] = gs.xyz.shape[0]
@@ -96,6 +100,9 @@ class GSRenderer:
     def set_camera_fovy(self, fovy):
         if not fovy == self.camera.fovy:
             self.camera.update_fovy(fovy)
+
+    def set_camera_clip_planes(self, znear, zfar=None):
+        self.camera.update_clip_planes(znear, zfar)
     
     def set_camera_resolution(self, height, width):
         if not (height == self.camera.h and width == self.camera.w):

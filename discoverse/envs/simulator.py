@@ -100,7 +100,12 @@ class SimulatorBase:
             if self.config.use_gaussian_renderer:
                 print(">>> GSRenderer ENABLED: Loading PLY models:", self.config.gs_model_dict.keys())
 
-                self.gs_renderer = GSRenderer(self.config.gs_model_dict, self.config.render_set["width"], self.config.render_set["height"])
+                self.gs_renderer = GSRenderer(
+                    self.config.gs_model_dict,
+                    self.config.render_set["width"], self.config.render_set["height"],
+                    znear=getattr(self.config, "gs_znear", 0.01),
+                    background_sh_degree=getattr(self.config, "gs_background_sh_degree", 0),
+                )
                 self.last_cam_id = self.cam_id
                 self.show_gaussian_img = True
                 if self.cam_id == -1:
@@ -435,7 +440,7 @@ class SimulatorBase:
             if cam_id == -1:
                 self.renderer.update_scene(self.mj_data, self.free_camera, self.options)
                 self.gs_renderer.set_camera_fovy(self.mj_model.vis.global_.fovy * np.pi / 180.0)
-            if self.last_cam_id != cam_id and cam_id > -1:
+            if cam_id > -1:
                 self.gs_renderer.set_camera_fovy(self.mj_model.cam_fovy[cam_id] * np.pi / 180.0)
             self.last_cam_id = cam_id
             trans, quat_wxyz = self.getCameraPose(cam_id)
@@ -455,13 +460,12 @@ class SimulatorBase:
         if self.config.use_gaussian_renderer and self.show_gaussian_img:
             if cam_id == -1:
                 self.renderer.update_scene(self.mj_data, self.free_camera, self.options)
-            if self.last_cam_id != cam_id:
-                if cam_id == -1:
-                    self.gs_renderer.set_camera_fovy(np.pi * 0.25)
-                elif cam_id > -1:
-                    self.gs_renderer.set_camera_fovy(self.mj_model.cam_fovy[cam_id] * np.pi / 180.0)
-                else:
-                    return None
+            if cam_id == -1:
+                self.gs_renderer.set_camera_fovy(self.mj_model.vis.global_.fovy * np.pi / 180.0)
+            elif cam_id > -1:
+                self.gs_renderer.set_camera_fovy(self.mj_model.cam_fovy[cam_id] * np.pi / 180.0)
+            else:
+                return None
             self.last_cam_id = cam_id
             trans, quat_wxyz = self.getCameraPose(cam_id)
             self.gs_renderer.set_camera_pose(trans, quat_wxyz[[1,2,3,0]])
@@ -558,7 +562,14 @@ class SimulatorBase:
                 if key == glfw.KEY_G:  # Ctrl + G
                     if self.config.use_gaussian_renderer:
                         self.show_gaussian_img = not self.show_gaussian_img
+                        # Reapply camera intrinsics and current body poses on return.
+                        self.last_cam_id = -2
+                        if self.show_gaussian_img:
+                            self.update_gs_scene()
                         self.gs_renderer.renderer.need_rerender = True
+                        print("Ctrl+G: " + ("3DGS" if self.show_gaussian_img else "MuJoCo"), flush=True)
+                    else:
+                        print("Ctrl+G unavailable: start this task with --gaussian to load 3DGS assets.", flush=True)
                 elif key == glfw.KEY_D:  # Ctrl + D
                     if self.config.use_gaussian_renderer:
                         self.gs_renderer.renderer.need_rerender = True

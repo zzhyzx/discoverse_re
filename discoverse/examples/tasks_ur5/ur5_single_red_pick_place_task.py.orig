@@ -1,0 +1,396 @@
+import argparse
+import json
+import os
+
+import mujoco
+import numpy as np
+from scipy.spatial.transform import Rotation
+
+from discoverse import DISCOVERSE_ROOT_DIR
+from discoverse.robots.ur5.ur5_ik import UR5IK
+from discoverse.robots_env.ur5_base import UR5Base, UR5Cfg
+from discoverse.task_base.airbot_task_base import PyavImageEncoder
+from discoverse.utils import step_func
+
+
+TASK_INSTRUCTION = "Pick up the red block and place it in the green target area"
+GRIPPER_OPEN = 0.0
+GRIPPER_CLOSED = 255.0
+GRIPPER_JOINT_RANGE = 0.8
+
+
+class EpisodeFailure(RuntimeError):
+    pass
+
+
+class SimNode(UR5Base):
+    def __init__(self, config, rng, randomize=True):
+        self.rng = rng
+        self.randomize = randomize
+        super().__init__(config)
+        self.block_id = mujoco.mj_name2id(
+            self.mj_model, mujoco.mjtObj.mjOBJ_BODY, "red_block"
+        )
+        self.target_id = mujoco.mj_name2id(
+            self.mj_model, mujoco.mjtObj.mjOBJ_BODY, "target_zone"
+        )
+        block_jid = self.mj_model.body_jntadr[self.block_id]
+        self.block_qpos_adr = self.mj_model.jnt_qposadr[block_jid]
+        self.block_qvel_adr = self.mj_model.jnt_dofadr[block_jid]
+        gripper_jid = mujoco.mj_name2id(
+            self.mj_model,
+            mujoco.mjtObj.mjOBJ_JOINT,
+            "gripper_right_driver_joint",
+        )
+        self.gripper_qpos_adr = self.mj_model.jnt_qposadr[gripper_jid]
+        self.gripper_qvel_adr = self.mj_model.jnt_dofadr[gripper_jid]
+        self.home_q = self.mj_model.key_qpos[self.home_key_id, :6].copy()
+        self.home_tcp_rotation = None
+        self.target_control = np.zeros(7)
+
+    def resetState(self):
+        super().resetState()
+        if self.randomize:
+            adr = self.block_qpos_adr
+            self.mj_data.qpos[adr] = self.rng.uniform(0.57, 0.63)
+            self.mj_data.qpos[adr + 1] = self.rng.uniform(-0.06, 0.06)
+            yaw = self.rng.uniform(-np.deg2rad(15), np.deg2rad(15))
+            quat = Rotation.from_euler("z", yaw).as_quat()
+            self.mj_data.qpos[adr + 3 : adr + 7] = quat[[3, 0, 1, 2]]
+        self.mj_data.qvel[:] = 0
+        self.target_control[:6] = self.mj_data.qpos[:6]
+        self.target_control[6] = GRIPPER_OPEN
+        mujoco.mj_forward(self.mj_model, self.mj_data)
+        if self.home_tcp_rotation is None:
+            self.home_tcp_rotation = (
+                self.mj_data.site_xmat[self.ee_site_id].reshape(3, 3).copy()
+            )
+
+    def block_pos(self):
+        return self.mj_data.xpos[self.block_id].copy()
+
+    def target_pos(self):
+        return self.mj_data.xpos[self.target_id].copy()
+
+    def normalized_state(self):
+        grip = np.clip(
+            self.mj_data.qpos[self.gripper_qpos_adr] / GRIPPER_JOINT_RANGE, 0, 1
+        )
+        return np.r_[self.mj_data.qpos[:6], grip].astype(np.float32)
+
+    def normalized_velocity(self):
+        grip = self.mj_data.qvel[self.gripper_qvel_adr] / GRIPPER_JOINT_RANGE
+        return np.r_[self.mj_data.qvel[:6], grip].astype(np.float32)
+
+    def success_info(self):
+        block = self.block_pos()
+        target = self.target_pos()
+        xy_error = np.abs(block[:2] - target[:2])
+        speed = np.linalg.norm(
+            self.mj_data.qvel[self.block_qvel_adr : self.block_qvel_adr + 3]
+        )
+        return {
+            "inside": bool(np.all(xy_error <= 0.035)),
+            "on_table": abs(float(block[2]) - 0.025) <= 0.015,
+            "stationary": speed <= 0.03,
+            "open": self.mj_data.qpos[self.gripper_qpos_adr] < 0.15,
+            "xy_error": xy_error,
+            "speed": float(speed),
+        }
+
+    def check_success(self):
+        s = self.success_info()
+        return s["inside"] and s["on_table"] and s["stationary"] and s["open"]
+
+
+class Expert:
+    NAMES = [
+        "home/open",
+        "above block",
+        "pregrasp",
+        "grasp height",
+        "close",
+        "lift/verify",
+        "above target",
+        "place height",
+        "open",
+        "retreat",
+    ]
+
+    def __init__(self, env):
+        self.env = env
+        self.ik_data = mujoco.MjData(env.mj_model)
+        mujoco.mj_forward(env.mj_model, self.ik_data)
+        self.ik = UR5IK(env.mj_model, self.ik_data)
+        self.state = 0
+        self.state_start = 0.0
+        self.wait_until = 0.0
+        self.target_tcp = None
+        self.grasp_xy = None
+        self.finished = False
+
+    def reset(self):
+        self.state = 0
+        self.grasp_xy = self.env.block_pos()[:2].copy()
+        self.finished = False
+        self.enter()
+
+    def solve(self, pos):
+        pos = np.asarray(pos, dtype=float)
+        q = self.ik.properIK(
+            pos, self.env.home_tcp_rotation, self.env.mj_data.qpos[:6].copy()
+        )
+        self.ik_data.qpos[:] = self.env.mj_data.qpos
+        self.ik_data.qvel[:] = 0
+        self.ik_data.qpos[:6] = q
+        mujoco.mj_forward(self.env.mj_model, self.ik_data)
+        got_pos = self.ik_data.site_xpos[self.env.ee_site_id]
+        got_rot = self.ik_data.site_xmat[self.env.ee_site_id].reshape(3, 3)
+        pos_err = np.linalg.norm(got_pos - pos)
+        rot_err = np.linalg.norm(
+            Rotation.from_matrix(
+                self.env.home_tcp_rotation @ got_rot.T
+            ).as_rotvec()
+        )
+        if not np.all(np.isfinite(q)) or pos_err > 0.015 or rot_err > 0.15:
+            raise EpisodeFailure(
+                f"IK failed: position_error={pos_err:.4f}, rotation_error={rot_err:.4f}"
+            )
+        return q
+
+    def pose(self, pos):
+        self.target_tcp = np.asarray(pos, dtype=float)
+        self.env.target_control[:6] = self.solve(self.target_tcp)
+
+    def enter(self):
+        now = float(self.env.mj_data.time)
+        self.state_start = now
+        self.target_tcp = None
+        target = self.env.target_pos()
+        block = self.env.block_pos()
+
+        if self.state == 0:
+            self.env.target_control[:6] = self.env.home_q
+            self.env.target_control[6] = GRIPPER_OPEN
+        elif self.state == 1:
+            self.pose([*self.grasp_xy, 0.18])
+        elif self.state == 2:
+            self.pose([*self.grasp_xy, 0.085])
+        elif self.state == 3:
+            self.pose([*self.grasp_xy, block[2] + 0.008])
+        elif self.state == 4:
+            self.env.target_control[6] = GRIPPER_CLOSED
+            self.wait_until = now + 0.8
+        elif self.state == 5:
+            self.pose([*self.grasp_xy, 0.18])
+        elif self.state == 6:
+            self.pose([target[0], target[1], 0.18])
+        elif self.state == 7:
+            self.pose([target[0], target[1], 0.040])
+        elif self.state == 8:
+            self.env.target_control[6] = GRIPPER_OPEN
+            self.wait_until = now + 0.8
+        elif self.state == 9:
+            self.pose([target[0], target[1], 0.18])
+        else:
+            self.finished = True
+            return
+        print(f"  -> state {self.state}: {self.NAMES[self.state]}")
+
+    def arm_done(self):
+        joint_err = np.max(
+            np.abs(self.env.mj_data.qpos[:6] - self.env.target_control[:6])
+        )
+        tcp_err = 0.0
+        if self.target_tcp is not None:
+            tcp_err = np.linalg.norm(
+                self.env.mj_data.site_xpos[self.env.ee_site_id] - self.target_tcp
+            )
+        return joint_err < 0.045 and tcp_err < 0.012
+
+    def update(self):
+        if self.finished:
+            return
+        now = float(self.env.mj_data.time)
+        if now - self.state_start > 5.0:
+            joint_err = np.max(np.abs(self.env.mj_data.qpos[:6] - self.env.target_control[:6]))
+            tcp_err = 0.0 if self.target_tcp is None else np.linalg.norm(
+                self.env.mj_data.site_xpos[self.env.ee_site_id] - self.target_tcp
+            )
+            raise EpisodeFailure(f"state {self.state} ({self.NAMES[self.state]}) timed out: joint_error={joint_err:.4f}, tcp_error={tcp_err:.4f}")
+        done = now >= self.wait_until if self.state in (4, 8) else self.arm_done()
+        if not done:
+            return
+        print(f"  <- state {self.state}: done")
+        if self.state == 5 and self.env.block_pos()[2] < 0.070:
+            raise EpisodeFailure("grasp verification failed: block was not lifted")
+        self.state += 1
+        self.enter()
+
+
+def make_config(auto):
+    cfg = UR5Cfg()
+    cfg.mjcf_file_path = "mjcf/ur5/scene_single_red_block.xml"
+    cfg.timestep = 1 / 240
+    cfg.decimation = 12
+    cfg.sync = not auto
+    cfg.headless = auto
+    cfg.render_set = {"fps": 20, "width": 640, "height": 480}
+    cfg.obs_rgb_cam_id = [0]
+    cfg.use_gaussian_renderer = False
+    return cfg
+
+
+def new_buffers():
+    return {
+        "time": [],
+        "qpos": [],
+        "qvel": [],
+        "ee_pos": [],
+        "ee_quat": [],
+        "block_pos": [],
+        "target_pos": [],
+        "act": [],
+    }
+
+
+def record(env, obs, raw_action, buffers, encoder):
+    encoder.encode(obs["img"][0], obs["time"])
+    buffers["time"].append(float(obs["time"]))
+    buffers["qpos"].append(env.normalized_state().tolist())
+    buffers["qvel"].append(env.normalized_velocity().tolist())
+    buffers["ee_pos"].append(list(obs["ep"]))
+    buffers["ee_quat"].append(list(obs["eq"]))
+    buffers["block_pos"].append(env.block_pos().tolist())
+    buffers["target_pos"].append(env.target_pos().tolist())
+    policy_action = np.asarray(raw_action, dtype=np.float32).copy()
+    policy_action[6] = np.clip(policy_action[6] / 255.0, 0, 1)
+    buffers["act"].append(policy_action.tolist())
+
+
+def save_episode(path, buffers, seed, attempt):
+    payload = {
+        "time": buffers["time"],
+        "obs": {
+            "qpos": buffers["qpos"],
+            "qvel": buffers["qvel"],
+            "ee_pos": buffers["ee_pos"],
+            "ee_quat": buffers["ee_quat"],
+            "block_pos": buffers["block_pos"],
+            "target_pos": buffers["target_pos"],
+        },
+        "act": buffers["act"],
+        "language_instruction": TASK_INSTRUCTION,
+        "metadata": {
+            "robot": "ur5e_robotiq_2f85",
+            "camera_ids": [0],
+            "fps": 20,
+            "state_dim": 7,
+            "action_dim": 7,
+            "gripper_convention": "normalized: 0=open, 1=closed",
+            "seed": seed,
+            "attempt": attempt,
+            "success": True,
+        },
+    }
+    with open(os.path.join(path, "obs_action.json"), "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--data_idx", type=int, default=0)
+    parser.add_argument("--data_set_size", type=int, default=1)
+    parser.add_argument("--auto", action="store_true")
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--no_randomization", action="store_true")
+    parser.add_argument("--max_attempts", type=int, default=0)
+    args = parser.parse_args()
+
+    env = SimNode(
+        make_config(args.auto),
+        np.random.default_rng(args.seed),
+        randomize=not args.no_randomization,
+    )
+    expert = Expert(env)
+    save_root = os.path.join(
+        DISCOVERSE_ROOT_DIR, "data", "ur5_single_red_pick_place"
+    )
+    os.makedirs(save_root, exist_ok=True)
+
+    index = args.data_idx
+    end = index + args.data_set_size
+    attempts = 0
+    raw_action = np.zeros(7)
+    try:
+        while env.running and index < end:
+            if args.max_attempts and attempts >= args.max_attempts:
+                print(f"Reached max_attempts={args.max_attempts}")
+                break
+            attempts += 1
+            env.reset()
+            expert.reset()
+            raw_action[:] = env.target_control
+            episode_start = float(env.mj_data.time)
+            settle_start = None
+            buffers = new_buffers()
+            save_path = os.path.join(save_root, f"{index:03d}")
+            os.makedirs(save_path, exist_ok=True)
+            encoder = PyavImageEncoder(640, 480, save_path, 0)
+            print(
+                f"\n=== attempt {attempts} | sample {index:03d} | "
+                f"block={np.round(env.block_pos(), 3)} ==="
+            )
+
+            success = False
+            failure = None
+            try:
+                while env.running:
+                    expert.update()
+                    for i in range(6):
+                        raw_action[i] = step_func(
+                            raw_action[i],
+                            env.target_control[i],
+                            0.75 * env.delta_t,
+                        )
+                    raw_action[6] = env.target_control[6]
+                    obs, _, _, _, _ = env.step(raw_action)
+                    record(env, obs, raw_action, buffers, encoder)
+
+                    if env.mj_data.time - episode_start > 30:
+                        raise EpisodeFailure("episode timed out")
+                    if expert.finished:
+                        if env.check_success():
+                            if settle_start is None:
+                                settle_start = float(env.mj_data.time)
+                            elif env.mj_data.time - settle_start >= 1.5:
+                                success = True
+                                break
+                        elif env.mj_data.time - expert.state_start > 3:
+                            s = env.success_info()
+                            raise EpisodeFailure(
+                                "placement verification failed: "
+                                f"xy_error={np.round(s['xy_error'], 4)}, "
+                                f"z={env.block_pos()[2]:.4f}, speed={s['speed']:.4f}"
+                            )
+            except EpisodeFailure as exc:
+                failure = str(exc)
+            finally:
+                encoder.close()
+
+            if success:
+                save_episode(save_path, buffers, args.seed, attempts)
+                print(f"SUCCESS {index + 1 - args.data_idx}/{args.data_set_size}: {save_path}")
+                index += 1
+            else:
+                encoder.remove_av_file()
+                print(f"FAILED attempt {attempts}: {failure or 'simulation stopped'}")
+    except KeyboardInterrupt:
+        print("\nInterrupted by user")
+
+    print(f"\nCollected {index - args.data_idx}/{args.data_set_size} episodes")
+    print(f"Data directory: {save_root}")
+
+
+if __name__ == "__main__":
+    main()

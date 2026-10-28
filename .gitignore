@@ -253,3 +253,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Source configuration needed by the UR5 SmolVLA deployment entry point.
+!policies/smolvla/configs/ur5_real_deploy.json
+
+# Versioned UR5 experiment configuration (no session credentials)
+!policies/smolvla/configs/ur5_deploy_takeover16_000500.json
+!policies/smolvla/configs/ur5_deploy_low_speed_v1.json
+!policies/smolvla/configs/ur5_deploy_sim_023000.json
+!policies/smolvla/configs/ur5_deploy_real_010000.json
+!configs/control/ur5_low_speed_v1.json
+!models/mjcf/ur5/camera_initial_v3.json

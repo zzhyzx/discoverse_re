@@ -41,8 +41,8 @@ class UR5Base(SimulatorBase):
         except:
             self.home_key_id = -1
 
-        # 末端执行器（Robotiq 夹爪挂载点）
-        self.ee_body_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_BODY, "base_mount")
+        # 末端执行器：Robotiq 两指之间的 pinch TCP site
+        self.ee_site_id = mujoco.mj_name2id(self.mj_model, mujoco.mjtObj.mjOBJ_SITE, "gripper_pinch")
 
     def resetState(self):
         mujoco.mj_resetData(self.mj_model, self.mj_data)
@@ -61,8 +61,8 @@ class UR5Base(SimulatorBase):
             self.mj_model.actuator_ctrlrange[:self.n_arm, 1]
         )
 
-        # 夹爪：单 actuator fingers_actuator（ctrl[6]，范围 0~255）
-        self.mj_data.ctrl[6] = action[6]
+        # 夹爪：单 actuator gripper_fingers_actuator（ctrl[6]，范围 0~255）
+        self.mj_data.ctrl[6] = np.clip(action[6], self.mj_model.actuator_ctrlrange[6, 0], self.mj_model.actuator_ctrlrange[6, 1])
 
     def checkTerminated(self):
         return False
@@ -73,8 +73,8 @@ class UR5Base(SimulatorBase):
             "qpos": self.qpos[:6].copy(),
             "qvel": self.qvel[:6].copy(),
             "gripper": self.qpos[6],  # 夹爪 driver joint 位置（0~0.8）
-            "ep": self.mj_data.xpos[self.ee_body_id].tolist(),  # 末端 XYZ
-            "eq": self.mj_data.xquat[self.ee_body_id].tolist(),  # 末端四元数姿态
+            "ep": self.mj_data.site_xpos[self.ee_site_id].tolist(),  # 末端 XYZ
+            "eq": Rotation.from_matrix(self.mj_data.site_xmat[self.ee_site_id].reshape(3, 3)).as_quat()[[3, 0, 1, 2]].tolist(),  # 末端四元数姿态
             "img": self.img_rgb_obs_s.copy()  # 主相机 RGB 图像
         }
         return self.obs

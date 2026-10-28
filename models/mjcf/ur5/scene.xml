@@ -16,41 +16,45 @@
 
   <worldbody>
     <light pos="0 0 1.5" dir="0 0 -1" directional="true"/>
-    <geom name="floor" size="0 0 0.05" type="plane" material="groundplane"/>
+    <geom name="floor" pos="0 0 -0.4" size="0 0 0.05" type="plane" material="groundplane"/>
 
     <!-- 主相机 -->
-    <camera name="primary_view" pos="1.0 0.0 0.8" xyaxes="0 1 0 -0.6 0 0.8" fovy="45"/>
+    <camera name="primary_view" pos="1.0 0.0 0.4" xyaxes="0 1 0 -0.6 0 0.8" fovy="45"/>
 
     <!-- 桌子 -->
-    <body name="table" pos="0.55 0 0.2">
+    <body name="table" pos="0.55 0 -0.2">
       <geom name="table_geom" type="box" size="0.45 0.35 0.2" rgba="0.75 0.55 0.35 1"/>
     </body>
 
     <!-- 红色方块（可推动） -->
-    <body name="red_block" pos="0.50 -0.08 0.42">
+    <body name="red_block" pos="0.50 -0.08 0.02">
       <freejoint/>
       <geom name="red_block_geom" type="box" size="0.025 0.025 0.02" mass="0.1"
             rgba="0.9 0.1 0.1 1" friction="0.8 0.01 0.001"/>
     </body>
 
     <!-- 蓝色方块（可推动） -->
-    <body name="blue_block" pos="0.50 0.00 0.42">
+    <body name="blue_block" pos="0.50 0.00 0.02">
       <freejoint/>
       <geom name="blue_block_geom" type="box" size="0.025 0.025 0.02" mass="0.1"
             rgba="0.1 0.2 0.9 1" friction="0.8 0.01 0.001"/>
     </body>
 
     <!-- 绿色方块（可推动） -->
-    <body name="green_block" pos="0.50 0.08 0.42">
+    <body name="green_block" pos="0.50 0.08 0.02">
       <freejoint/>
       <geom name="green_block_geom" type="box" size="0.025 0.025 0.02" mass="0.1"
             rgba="0.1 0.8 0.2 1" friction="0.8 0.01 0.001"/>
     </body>
 
     <!-- 目标区域（绿色框） -->
-    <body name="target_zone" pos="0.72 0 0.405">
+    <body name="target_zone" pos="0.72 0 0.005">
       <geom name="target_geom" type="box" size="0.05 0.05 0.001" rgba="0 1 0 0.4"
             contype="0" conaffinity="0"/>
     </body>
   </worldbody>
+  <keyframe>
+    <key name="home" qpos="0.257537129 -1.629076553 -1.938089175 -1.141896762 1.583877663 0.240474949 0 0 0 0 0 0 0 0 0.50 -0.08 0.02 1 0 0 0 0.50 0.00 0.02 1 0 0 0 0.50 0.08 0.02 1 0 0 0" ctrl="0.257537129 -1.629076553 -1.938089175 -1.141896762 1.583877663 0.240474949 0"/>
+  </keyframe>
+
 </mujoco>

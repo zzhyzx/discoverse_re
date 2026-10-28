@@ -32,6 +32,7 @@
   </default>
 
   <asset>
+    <model name="robotiq_2f85" file="robotiq_2f85/2f85.xml"/>
     <material class="ur5e" name="black" rgba="0.033 0.033 0.033 1"/>
     <material class="ur5e" name="jointgray" rgba="0.278 0.278 0.278 1"/>
     <material class="ur5e" name="linkgray" rgba="0.82 0.82 0.82 1"/>
@@ -112,6 +113,9 @@
                   <geom material="linkgray" mesh="wrist3" class="visual"/>
                   <geom class="eef_collision" pos="0 0.08 0" quat="1 1 0 0" size="0.04 0.02"/>
                   <site name="attachment_site" pos="0 0.1 0" quat="-1 1 0 0"/>
+                  <frame name="robotiq_mount" pos="0 0.1 0" quat="-1 1 0 0">
+                    <attach model="robotiq_2f85" body="base_mount" prefix="gripper_"/>
+                  </frame>
                 </body>
               </body>
             </body>
@@ -130,11 +134,5 @@
     <general class="size1" name="wrist_3" joint="wrist_3_joint"/>
   </actuator>
 
-  <keyframe>
-    <key name="home" qpos="0.267 -1.573 -1.353 -1.801 1.588 -1.286" ctrl="0.267 -1.573 -1.353 -1.801 1.588 -1.286"/>
-  </keyframe>
 
-  <!-- 挂载 Robotiq 2F-85 -->
-  <include file="robotiq_2f85/2f85.xml"/>
-  <attach body="base_mount" target="attachment_site"/>
 </mujoco>

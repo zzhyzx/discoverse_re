@@ -41,7 +41,8 @@ def multiple_quaternions(qwxyz1, qwxyz2):
 
 class Camera:
     def __init__(self, h, w):
-        self.znear = 1e-6
+        # Metres; shared with CUDA near culling by the renderer.
+        self.znear = 0.01
         self.zfar = 100
         self.h = h
         self.w = w
@@ -103,12 +104,23 @@ class Camera:
         self.target = self.position + _dir * self.target_dist
         
     def update_resolution(self, height, width):
-        self.h = max(height, 1)
-        self.w = max(width, 1)
+        if int(height) != height or int(width) != width or min(height, width) < 1:
+            raise ValueError("Camera resolution must contain positive integers")
+        self.h = int(height)
+        self.w = int(width)
         self.is_intrin_dirty = True
     
     def update_fovy(self, fovy):
-        self.fovy = fovy
+        if not np.isfinite(fovy) or not 0 < fovy < np.pi:
+            raise ValueError("Camera fovy must be finite and between 0 and pi radians")
+        self.fovy = float(fovy)
+        self.is_intrin_dirty = True
+
+    def update_clip_planes(self, znear, zfar=None):
+        zfar = self.zfar if zfar is None else zfar
+        if not np.isfinite([znear, zfar]).all() or not 0 < znear < zfar:
+            raise ValueError("Camera clip planes must satisfy 0 < znear < zfar")
+        self.znear, self.zfar = float(znear), float(zfar)
         self.is_intrin_dirty = True
 
 @dataclass
@@ -139,8 +151,9 @@ def gamma_shs(shs, gamma):
     new_shs = ((np.clip(shs * C0 + 0.5, 0.0, 1.0) ** gamma) - 0.5) / C0
     return new_shs
 
-def load_ply(path, gamma=1):
-    max_sh_degree = 0
+def load_ply(path, gamma=1, max_sh_degree=0):
+    if max_sh_degree not in (0, 1, 2, 3):
+        raise ValueError("max_sh_degree must be 0, 1, 2 or 3")
     plydata = PlyData.read(path)
 
     super_splat_format = True
@@ -252,6 +265,10 @@ def load_ply(path, gamma=1):
         quats = q.astype(np.float32)
 
         # return positions, quats, scales, colors, opacities
+        if max_sh_degree:
+            padded = np.zeros((len(colors), (max_sh_degree + 1) ** 2, 3), dtype=np.float32)
+            padded[:, 0] = colors
+            colors = padded.reshape(len(colors), -1)
         return GaussianData(positions, quats, scales, opacities, colors)
 
     else:
@@ -277,6 +294,9 @@ def load_ply(path, gamma=1):
         features_extra = features_extra.reshape((features_extra.shape[0], 3, len(extra_f_names)//3))
         features_extra = features_extra[:, :, :(max_sh_degree + 1) ** 2 - 1]
         features_extra = np.transpose(features_extra, [0, 2, 1])
+        requested = (max_sh_degree + 1) ** 2 - 1
+        if features_extra.shape[1] < requested:
+            features_extra = np.pad(features_extra, ((0, 0), (0, requested - features_extra.shape[1]), (0, 0)))
 
         scale_names = [p.name for p in plydata.elements[0].properties if p.name.startswith("scale_")]
         scale_names = sorted(scale_names, key = lambda x: int(x.split('_')[-1]))

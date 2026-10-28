@@ -4,13 +4,13 @@ from scipy.spatial.transform import Rotation
 
 
 class UR5IK:
-    def __init__(self, mj_model, mj_data, ee_name="base_mount", is_site=False):
+    def __init__(self, mj_model, mj_data, ee_name="gripper_pinch", is_site=True):
         """
         基于 MuJoCo 雅可比矩阵的数值逆运动学求解器 (Damped Least Squares)
 
         :param mj_model: mujoco 的 model
         :param mj_data: mujoco 的 data
-        :param ee_name: 末端执行器的名字 (通常是 body "gripper" 或 site "attachment_site")
+        :param ee_name: 末端执行器的名字 (通常是 body 或 site（Robotiq 默认使用 site "gripper_pinch"）)
         :param is_site: ee_name 是否是一个 site
         """
         self.model = mj_model
@@ -29,8 +29,8 @@ class UR5IK:
         # IK 迭代超参数
         self.step_size = 0.5  # 迭代步长
         self.tol = 1e-4  # 误差容忍度 (米/弧度)
-        self.max_iter = 100  # 最大迭代次数
-        self.damping = 1e-4  # 阻尼系数 (防止奇异点崩溃)
+        self.max_iter = 200  # 最大迭代次数
+        self.damping = 1e-3  # 提高阻尼，减少奇异位形附近的分支跳变
 
     def properIK(self, pos, ori, ref_q):
         """
@@ -49,6 +49,7 @@ class UR5IK:
         # 2. 将初始猜测值赋给模型
         self.data.qpos[:6] = ref_q[:6]
         mujoco.mj_kinematics(self.model, self.data)
+        mujoco.mj_comPos(self.model, self.data)
 
         # 3. 开始迭代求解
         for _ in range(self.max_iter):
@@ -85,13 +86,16 @@ class UR5IK:
                 mujoco.mj_jacBody(self.model, self.data, self.jacp, self.jacr, self.ee_id)
 
             # 我们只关心前 6 个关节 (UR5 手臂)
-            J = np.vstack([self.jacp[:, :6], self.jacr[:, :6]])
+            J = np.vstack([self.jacp[:, :6], self.jacr[:, :6] * 0.1])
 
             # 使用阻尼最小二乘法 (Damped Least Squares) 计算关节增量
             # delta_q = J.T * (J * J.T + lambda * I)^-1 * err
             J_T = J.T
             lambda_I = self.damping * np.eye(6)
-            delta_q = J_T @ np.linalg.inv(J @ J_T + lambda_I) @ err
+            delta_q = J_T @ np.linalg.solve(J @ J_T + lambda_I, err)
+            delta_norm = np.linalg.norm(delta_q)
+            if delta_norm > 0.2:
+                delta_q *= 0.2 / delta_norm
 
             # 更新关节角度
             self.data.qpos[:6] += self.step_size * delta_q
@@ -105,6 +109,7 @@ class UR5IK:
 
             # 更新运动学状态
             mujoco.mj_kinematics(self.model, self.data)
+            mujoco.mj_comPos(self.model, self.data)
 
         # 4. 提取求解结果
         result_q = self.data.qpos[:6].copy()
@@ -119,6 +124,7 @@ class UR5IK:
         # 5. 恢复原始的物理状态
         self.data.qpos[:] = qpos_orig
         mujoco.mj_kinematics(self.model, self.data)
+        mujoco.mj_comPos(self.model, self.data)
 
         return result_q
 
@@ -132,8 +138,8 @@ if __name__ == "__main__":
         model = mujoco.MjModel.from_xml_path(xml_path)
         data = mujoco.MjData(model)
 
-        # 初始化 IK 求解器（UR5 末端 body 是 base_mount）
-        arm_ik = UR5IK(model, data, ee_name="base_mount")
+        # 初始化 IK 求解器（UR5 + Robotiq 使用 pinch TCP site）
+        arm_ik = UR5IK(model, data, ee_name="gripper_pinch", is_site=True)
 
         # 设定一个目标位置和姿态 (夹爪朝下)
         target_pos = np.array([0.5, 0.0, 0.4])
